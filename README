@@ -1,0 +1,127 @@
+WHAT IS MP? 
+
+  MP is a macro processor that evaluates delimited Forth source code
+  encountered in a stream of input text.
+
+  It has been implemented as a filter program, meaning that it reads
+  text received via the standard input stream and writes text to the 
+  standard output stream.
+
+
+HOW DOES IT WORK?
+
+  All characters available via the input stream are READ and stored
+  in the INPUT buffer. The characters in the buffer are subjected to
+  a PROCESS that consists of two alternating phases of operation:
+
+  1. In the first phase, characters are written to the output stream
+     until the INTRODUCER character is encountered, or until the end
+     of the buffer is reached.
+
+  2. In the second phase, all characters between the last INTRODUCER
+     character encountered and the next TERMINATOR character (or the
+     end of buffer) are passed off as a string of Forth source code
+     to EVALUATE.
+
+
+WHAT ARE THE DELIMITERS?
+
+  INTRODUCER and TERMINATOR are VALUES (assigned ` by default) that
+  may be reassigned any character value at any time:
+
+    `CHAR [ TO INTRODUCER  CHAR ] TO TERMINATOR`
+
+
+USE CASE: HTML TEMPLATE PROCESSOR
+
+  $ cat examples/countdown.html 
+  `
+  CREATE ACTIONS  S" BRIBERY" 2,  S" EXTORTION" 2,
+  : ACT           2 CELLS * ACTIONS + 2@ TYPE ;
+  : COIN-FLIP     TIME&DATE 5 0 DO DROP LOOP 2 MOD ;
+  : COUNT-DOWN    1- SWAP -DO I . 1 -LOOP ;
+  `
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <title>Countdown to Corruption!</title>
+    </head>
+    <body>
+      `10 0 COUNT-DOWN COIN-FLIP ACT`
+    </body>
+  </html>
+
+  $ mp < examples/countdown.html 
+  
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <title>Countdown to Corruption!</title>
+    </head>
+    <body>
+      10 9 8 7 6 5 4 3 2 1 0 EXTORTION
+    </body>
+  </html>
+
+
+USE CASE: ASSEMBLY MACRO PROCESSOR 
+
+  $ cat examples/gasleak.fs 
+  CREATE CALL-REGS  S" %ebx" 2,  S" %ecx" 2,  S" %edx" 2,
+                    S" %esi" 2,  S" %edi" 2,  S" %ebp" 2,
+  
+  : CALL-REG?       2 CELLS * CALL-REGS + 2@ ;
+  
+  : MOV             ." movl $" TYPE ." , " TYPE ." ; " ;
+  : SYSCALL         ." movl $" 0 U.R ." , %eax; int $0x80; " ;
+  : SYSCALL/ARGS:   CREATE , ,
+                    DOES> DUP @ 0 ?DO I CALL-REG? PARSE-NAME MOV LOOP
+                          CELL+ @ SYSCALL ;
+  
+  1 1 SYSCALL/ARGS: SYS-EXIT
+  4 3 SYSCALL/ARGS: SYS-WRITE
+
+  $ cat examples/goodbye.s 
+  `REQUIRE examples/gasleak.fs`
+  
+  .section .text
+  .global _start
+  _start:
+  	`SYS-WRITE 1 msg msglen`
+  	`SYS-EXIT 0`
+  
+  .section .data
+  msg: .ascii "GOODBYE!\n"
+  .set msglen, . - msg
+
+  $ ./mp < examples/goodbye.s | as -o examples/goodbye.o
+  $ objdump -d examples/goodbye.o
+
+  goodbye.o:     file format elf32-i386
+  
+  
+  Disassembly of section .text:
+  
+  00000000 <_start>:
+     0:   bb 01 00 00 00          mov    $0x1,%ebx
+     5:   b9 00 00 00 00          mov    $0x0,%ecx
+     a:   ba 09 00 00 00          mov    $0x9,%edx
+     f:   b8 04 00 00 00          mov    $0x4,%eax
+    14:   cd 80                   int    $0x80
+    16:   bb 00 00 00 00          mov    $0x0,%ebx
+    1b:   b8 01 00 00 00          mov    $0x1,%eax
+    20:   cd 80                   int    $0x80
+
+  $ ld -o examples/goodbye examples/goodbye.o
+  $ examples/goodbye 
+  GOODBYE!
+
+
+HOW DO I INSTALL IT?
+
+  The "mp" wrapper and "Makefile" were written with gforth in mind.
+  Alter these files to suit the needs of your system, if necessary.
+
+  # make install
+  install -m 644 mp.fs /usr/share/gforth/site-forth
+  install -m 755 mp    /usr/local/bin
